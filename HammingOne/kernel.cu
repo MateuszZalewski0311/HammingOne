@@ -6,6 +6,7 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#include <limits>
 
 // includes, cuda
 #include "cuda_runtime.h"
@@ -224,17 +225,68 @@ int main()
         return 1;
     }*/
 
+    unsigned short menu_choice = 0;
     //thrust::host_vector<std::bitset<1024>> h_data(100000);
     std::unordered_set<std::bitset<WORD_SIZE>> data_uset;
     std::vector<std::bitset<WORD_SIZE>> ham1_pairs_1;
     std::vector<std::bitset<WORD_SIZE>> ham1_pairs_2;
 
-    data_uset.reserve(DATA_SIZE);
-    generate_data<WORD_SIZE, DATA_SIZE>(data_uset);
-
-    find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, true);
-
-    system("pause");
+    while (menu_choice != 4) {
+        std::cout << "1. Generate Data" << std::endl;
+        std::cout << "2. Save/Load Data" << std::endl;
+        if (!data_uset.empty())
+            std::cout << "3. Find Pairs" << std::endl;
+        else
+            std::cout << "3. Find Pairs - !!! Generate/Load Data before attempting to find pairs !!!" << std::endl;
+        std::cout << "4. Exit" << std::endl;
+        std::cout << "5. Clear Console" << std::endl;
+        std::cout << "Choice: ";
+        std::cin >> menu_choice;
+        switch (menu_choice)
+        {
+        case 1:
+            if (!data_uset.empty())
+                data_uset.clear();
+            data_uset.reserve(DATA_SIZE);
+            std::cout << std::endl;
+            generate_data<WORD_SIZE, DATA_SIZE>(data_uset);
+            break;
+        case 2:
+            std::cout << std::endl << "Not implemented yet :(" << std::endl << std::endl;
+            break;
+        case 3:
+            if (!data_uset.empty()) {
+                std::cout << std::endl;
+                char c;
+                do {
+                    std::cout << "Output pairs to console? (y/n):";
+                    std::cin.clear();
+                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                    c = std::getc(stdin);
+                    if (c == 'y' || c == 'Y') {
+                        find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, true, true);
+                        break;
+                    }
+                    else if (c == 'n' || c == 'N') {
+                        find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, false, true);
+                        break;
+                    }
+                    std::cout << "Please provide a valid choice" << std::endl;
+                } while (true);
+            }
+            else
+                std::cout << std::endl << "!!! Generate/Load Data before attempting to find pairs !!!" << std::endl << std::endl;
+            break;
+        case 4:
+            break;
+        case 5:
+            system("CLS");
+            break;
+        default:
+            std::cout << std::endl << "Please provide a valid choice" << std::endl << std::endl;;
+            break;
+        }
+    }
 
     return 0;
 }
