@@ -17,8 +17,11 @@
 #include <thrust/device_vector.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define WORD_SIZE 23
-#define DATA_SIZE 10000
+#define WORD_SIZE 150
+#define DATA_SIZE 20
+#define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
+#define SUBWORD_SIZE(N) (unsigned int)((float)N / (sizeof(unsigned int) * 8.0f))
+#define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
 ////////////////////////////////////////////////////////////////////////////////
 // function declarations
@@ -33,6 +36,8 @@ template<size_t N>
 void find_ham1(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
     typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
     const bool timeCount = true, const bool pairsOutput = true, const bool consoleOutput = true);
+template<size_t N, size_t M>
+thrust::device_vector<unsigned int> moveDataToGPU(const typename std::unordered_set<std::bitset<N>>& data_uset);
 //template<size_t N>
 //void find_ham1_temp(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
 //    typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
@@ -82,7 +87,6 @@ void generate_data(typename std::unordered_set<std::bitset<N>>& _data_uset, \
         if (timeCount) elapsed = finish - start;
         std::cout << "Data Generation Finished!\n";
         if (timeCount) std::cout << "Elapsed time: " << elapsed.count() << " s\n";
-        //std::cout << "Data has " << data.size() << " unique elements\n";
         std::cout << std::endl;
     }
 }
@@ -117,8 +121,6 @@ void find_ham1(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
             {
                 _ham1_pairs_1.emplace_back(std::bitset<N>(*it1));
                 _ham1_pairs_2.emplace_back(std::bitset<N>(*it2));
-                //_ham1_pairs_1.push_back(*it1);
-                //_ham1_pairs_2.push_back(*it2);
                 ++ham1;
             }
         }
@@ -213,33 +215,73 @@ unsigned int hamming_distance(const typename std::bitset<N>& A, const typename s
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// move data to gpu
+template<size_t N, size_t M>
+thrust::device_vector<unsigned int> moveDataToGPU(const typename std::unordered_set<std::bitset<N>>& data_uset)
+{
+    //N - WORD_SIZE, M - DATA_SIZE
+    thrust::host_vector<unsigned int> h_words(M * SUBWORDS_PER_WORD(N));
+    thrust::device_vector<unsigned int> d_words;
+
+    int i = 0;
+    for (const auto& word_bitset : data_uset)
+    {
+        //std::cout << std::endl << "Original " << word_bitset.to_string() << std::endl;
+        if (N < UINT_BITSIZE)
+        {
+            std::string subword_str = word_bitset.to_string().substr(0, N);
+            for (size_t subword_str_size = N; subword_str_size < UINT_BITSIZE; ++subword_str_size)
+                subword_str += "0";
+            unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
+            //std::cout << "Subword: " << subword_str << ", " << subword << std::endl;
+            h_words[i++] = subword;
+            continue;
+        }
+        size_t j = 0;
+        for (; j + UINT_BITSIZE < N; j += UINT_BITSIZE)
+        {
+            std::string subword_str = word_bitset.to_string().substr(j, UINT_BITSIZE);
+            unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
+            //std::cout << "Subword: " << subword_str << ", " << subword << std::endl;
+            h_words[i++] = subword;
+        }
+        if (j + UINT_BITSIZE != N) // last subword smaller than UINT_BITSIZE
+        {
+            std::string subword_str = word_bitset.to_string().substr(j, N - j);
+            for (size_t subword_str_size = N - j; subword_str_size < UINT_BITSIZE; ++subword_str_size)
+                subword_str += "0";
+            unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
+            //std::cout << "Subword: " << subword_str << ", " << subword << std::endl;
+            h_words[i++] = subword;
+        }
+    }
+    d_words = h_words;
+    std::cout << std::endl << "Data moved to GPU" << std::endl << std::endl;
+    return d_words;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 int main()
 {
-    //cudaError_t cudaStatus;
-
-    // cudaDeviceReset must be called before exiting in order for profiling and
-    // tracing tools such as Nsight and Visual Profiler to show complete traces.
-    /*cudaStatus = cudaDeviceReset();
-    if (cudaStatus != cudaSuccess) {
-        fprintf(stderr, "cudaDeviceReset failed!");
-        return 1;
-    }*/
-
     unsigned short menu_choice = 0;
-    //thrust::host_vector<std::bitset<1024>> h_data(100000);
+    thrust::device_vector<unsigned int> d_words;
     std::unordered_set<std::bitset<WORD_SIZE>> data_uset;
     std::vector<std::bitset<WORD_SIZE>> ham1_pairs_1;
     std::vector<std::bitset<WORD_SIZE>> ham1_pairs_2;
 
-    while (menu_choice != 4) {
+    while (menu_choice != 5) {
         std::cout << "1. Generate Data" << std::endl;
         std::cout << "2. Save/Load Data" << std::endl;
-        if (!data_uset.empty())
-            std::cout << "3. Find Pairs" << std::endl;
-        else
-            std::cout << "3. Find Pairs - !!! Generate/Load Data before attempting to find pairs !!!" << std::endl;
-        std::cout << "4. Exit" << std::endl;
-        std::cout << "5. Clear Console" << std::endl;
+        if (!data_uset.empty()) {
+            std::cout << "3. Move Data to GPU" << std::endl;
+            std::cout << "4. Find Pairs" << std::endl;
+        }
+        else {
+            std::cout << "3. Move Data to GPU - !!! Generate/Load Data before attempting to move the data to GPU !!!" << std::endl;
+            std::cout << "4. Find Pairs - !!! Generate/Load Data before attempting to find pairs !!!" << std::endl;
+        }
+        std::cout << "5. Exit" << std::endl;
+        std::cout << "6. Clear Console" << std::endl;
         std::cout << "Choice: ";
         std::cin >> menu_choice;
         switch (menu_choice)
@@ -255,6 +297,12 @@ int main()
             std::cout << std::endl << "Not implemented yet :(" << std::endl << std::endl;
             break;
         case 3:
+            if (!data_uset.empty())
+                d_words = moveDataToGPU<WORD_SIZE, DATA_SIZE>(data_uset);
+            else
+                std::cout << std::endl << "!!! Generate / Load Data before attempting to move the data to GPU !!!" << std::endl << std::endl;
+            break;
+        case 4:
             if (!data_uset.empty()) {
                 std::cout << std::endl;
                 char c;
@@ -277,13 +325,13 @@ int main()
             else
                 std::cout << std::endl << "!!! Generate/Load Data before attempting to find pairs !!!" << std::endl << std::endl;
             break;
-        case 4:
-            break;
         case 5:
+            break;
+        case 6:
             system("CLS");
             break;
         default:
-            std::cout << std::endl << "Please provide a valid choice" << std::endl << std::endl;;
+            std::cout << std::endl << "Please provide a valid choice" << std::endl << std::endl;
             break;
         }
     }
