@@ -314,6 +314,7 @@ int main()
     size_t pair_flags_size = std::ceil((double)DATA_SIZE * ((double)DATA_SIZE / (double)UINT_BITSIZE));
     thrust::device_vector<unsigned int> d_subwords;
     thrust::device_vector<unsigned int> d_pair_flags(pair_flags_size, 0);
+    thrust::host_vector<unsigned int> h_pair_flags;
     unsigned int threads = 512;
     unsigned int blocks = (unsigned int)std::ceil(DATA_SIZE / (double)threads);
     dim3 dimBlock(threads, 1, 1);
@@ -403,6 +404,7 @@ int main()
                         if (d_subwords.empty())
                             std::cout << std::endl << "!!! No Data on GPU !!!" << std::endl << std::endl;
                         else {
+                            unsigned int pairs_count = 0;
                             auto d_subwords_ptr = thrust::raw_pointer_cast(d_subwords.begin().base());
                             auto d_pair_flags_ptr = thrust::raw_pointer_cast(d_pair_flags.begin().base());
                             float elapsed;
@@ -425,6 +427,16 @@ int main()
 
                             std::cout << "Finished!\n";
                             std::cout << "Elapsed time: " << elapsed << " ms\n";
+
+                            h_pair_flags = d_pair_flags;
+                            for (size_t i = 0; i < pair_flags_size; ++i)
+                            {
+                                pairs_count += __popcnt(h_pair_flags[i]);
+                            }
+
+                            std::cout << pairs_count << " pairs found\n";
+
+                            std::cout << std::endl;
 
                             cudaEventDestroy(start);
                             cudaEventDestroy(stop);
@@ -458,4 +470,3 @@ int main()
 
     return 0;
 }
-
