@@ -852,11 +852,11 @@ int main()
                                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                                 c = std::getc(stdin);
                                 if (c == 'y' || c == 'Y') {
-                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, true, out_to_console, true);
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, save_to_file, true, out_to_console, true);
                                     break;
                                 }
                                 else if (c == 'n' || c == 'N') {
-                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, true, out_to_console, false);
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, save_to_file, true, out_to_console, false);
                                     break;
                                 }
                                 std::cout << "Please provide a valid choice" << std::endl;
