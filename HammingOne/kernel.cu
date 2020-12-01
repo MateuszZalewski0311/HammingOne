@@ -18,8 +18,8 @@
 #include <thrust/device_vector.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define WORD_SIZE 1000
-#define DATA_SIZE 100000
+#define WORD_SIZE 100
+#define DATA_SIZE 10000
 #define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
 #define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
@@ -507,7 +507,7 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     
     std::cout << pairs_count_GPU << " pairs found\n\n";
 
-    if (!pairs_count_GPU)
+    if (pairs_count_GPU)
         process_pairs_from_flags<N>(h_pair_flags, pair_flags_size, data_vec, ham1_pairs, checkData, pairsOutput);
     else
         process_pairs_from_flags<N>(h_pair_flags, pair_flags_size, data_vec, ham1_pairs, checkData, false);
@@ -528,6 +528,7 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
     const typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs, \
     const bool checkData, const bool pairsOutput)
 {
+    if (!checkData && !pairsOutput) return;
     bool dataCorrect = true;
     const unsigned int subwords_per_word_flags = pair_flags_size / DATA_SIZE;
 
@@ -564,7 +565,7 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
                             dataCorrect = false;
                         }
                     }
-                    else if (pairsOutput) std::cout << data_vec[word_idx] << " " << data_vec[flag_pos] << std::endl;
+                    if (pairsOutput) std::cout << data_vec[word_idx] << " " << data_vec[flag_pos] << std::endl;
                     ++j;
                 }
                 word_flags[i] = word_flags[i] >> 1;
@@ -574,9 +575,11 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
         delete[] word_flags;
     }
 
-    if (checkData && dataCorrect) std::cout << "GPU Data is consistent with CPU Data" << std::endl << std::endl;
-
-    if (pairsOutput || !dataCorrect) std::cout << std::endl;
+    if (checkData && dataCorrect) {
+        if (pairsOutput) std::cout << std::endl;
+        std::cout << "GPU Data is consistent with CPU Data" << std::endl << std::endl;
+    }
+    else if (pairsOutput || !dataCorrect) std::cout << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -754,13 +757,11 @@ int main()
                                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                                 c = std::getc(stdin);
                                 if (c == 'y' || c == 'Y') {
-                                    if (out_to_console) find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, true, true, data_vec, ham1_pairs);
-                                    else find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, false, true, data_vec, ham1_pairs);
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, out_to_console, true, data_vec, ham1_pairs);
                                     break;
                                 }
                                 else if (c == 'n' || c == 'N') {
-                                    if (out_to_console) find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, true, false, data_vec, ham1_pairs);
-                                    else find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, false, false, data_vec, ham1_pairs);
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, out_to_console, false, data_vec, ham1_pairs);
                                     break;
                                 }
                                 std::cout << "Please provide a valid choice" << std::endl;
