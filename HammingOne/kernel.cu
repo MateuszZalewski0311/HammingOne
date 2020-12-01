@@ -17,8 +17,8 @@
 #include <thrust/device_vector.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define WORD_SIZE 24
-#define DATA_SIZE 10000
+#define WORD_SIZE 10
+#define DATA_SIZE 50
 #define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
 #define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
@@ -34,13 +34,18 @@ void generate_data(typename std::unordered_set<std::bitset<N>>& _data_uset, \
 template<size_t N>
 void find_ham1(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
     typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
-    const bool timeCount = true, const bool pairsOutput = true, const bool consoleOutput = true);
+    const bool timeCount = true, const bool pairsOutput = true);
 template<size_t N, size_t M>
 thrust::device_vector<unsigned int> move_data_to_GPU(const typename std::unordered_set<std::bitset<N>>& data_uset);
-//template<size_t N>
-//void find_ham1_temp(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
-//    typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
-//    const bool timeCount = true, const bool pairsOutput = true, const bool consoleOutput = true);
+__global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pair_flags);
+template<size_t N>
+void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
+    thrust::device_vector<unsigned int>& d_pair_flags, \
+    thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
+    const bool timeCount, const bool pairsOutput, const typename std::unordered_set<std::bitset<N>>& _data_uset);
+template<size_t N>
+void print_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
+    const typename std::unordered_set<std::bitset<N>>& _data_uset);
 
 ////////////////////////////////////////////////////////////////////////////////
 // word generating function
@@ -97,19 +102,19 @@ void generate_data(typename std::unordered_set<std::bitset<N>>& _data_uset, \
 // data saving function
 
 ////////////////////////////////////////////////////////////////////////////////
-// finding pairs with hamming distance 1 function
+// finding pairs with hamming distance 1 on CPU
 template<size_t N>
 void find_ham1(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
     typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
-    const bool timeCount, const bool pairsOutput, const bool consoleOutput)
+    const bool timeCount, const bool pairsOutput)
 {
     std::chrono::steady_clock::time_point start, finish;
     std::chrono::duration<double> elapsed;
 
-    if (consoleOutput) std::cout << "Looking for pairs with hamming distance 1 ...\n";
+    std::cout << "Looking for pairs with hamming distance 1 ...\n";
 
     // Record start time
-    if (consoleOutput && timeCount) start = std::chrono::high_resolution_clock::now();
+    if (timeCount) start = std::chrono::high_resolution_clock::now();
 
     unsigned int ham1 = 0;
     for (auto it1 = std::begin(_data_uset); it1 != std::end(_data_uset); ++it1)
@@ -126,17 +131,14 @@ void find_ham1(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
     }
 
     // Record end time
-    if (consoleOutput && timeCount) finish = std::chrono::high_resolution_clock::now();
+    if (timeCount) finish = std::chrono::high_resolution_clock::now();
+    if (timeCount) elapsed = finish - start;
 
-    if (consoleOutput)
-    {
-        if (timeCount) elapsed = finish - start;
-        std::cout << "Finished!\n";
-        if (timeCount) std::cout << "Elapsed time: " << elapsed.count() << " s\n";
-        std::cout << ham1 << " pairs found\n\n";
-    }
+    std::cout << "Finished!\n";
+    if (timeCount) std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+    std::cout << ham1 << " pairs found\n\n";
 
-    if (ham1 && pairsOutput && consoleOutput)
+    if (ham1 && pairsOutput)
     {
         std::cout << "Pairs found:\n";
 
@@ -148,62 +150,6 @@ void find_ham1(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
         std::cout << std::endl;
     }
 }
-
-//template<size_t N>
-//void find_ham1_temp(const typename std::unordered_set<std::bitset<N>>& _data_uset, \
-//    typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
-//    const bool timeCount, const bool pairsOutput, const bool consoleOutput)
-//{
-//    std::chrono::steady_clock::time_point start, finish;
-//    std::chrono::duration<double> elapsed;
-//
-//    if (consoleOutput) std::cout << "Looking for pairs with hamming distance 1 ...\n";
-//
-//    // Record start time
-//    if (consoleOutput && timeCount) start = std::chrono::high_resolution_clock::now();
-//
-//    unsigned int ham1 = 0;
-//    for (const auto& A : _data_uset)
-//    {
-//        for (const auto& B : _data_uset)
-//        {
-//            if (1 == hamming_distance<N>(A, B))
-//            {
-//                auto it1 = std::find(std::begin(_ham1_pairs_2), std::end(_ham1_pairs_2), A);
-//                auto it2 = std::find(std::begin(_ham1_pairs_1), std::end(_ham1_pairs_1), B);
-//                if (it1 != std::end(_ham1_pairs_2) && it2 != std::end(_ham1_pairs_1) && it1 - std::begin(_ham1_pairs_2) == it2 - std::begin(_ham1_pairs_1)) {
-//                    continue;
-//                }
-//                _ham1_pairs_1.emplace_back(std::bitset<N>(A));
-//                _ham1_pairs_2.emplace_back(std::bitset<N>(B));
-//                ++ham1;
-//            }
-//        }
-//    }
-//
-//    // Record end time
-//    if (consoleOutput && timeCount) finish = std::chrono::high_resolution_clock::now();
-//
-//    if (consoleOutput)
-//    {
-//        if (timeCount) elapsed = finish - start;
-//        std::cout << "Finished!\n";
-//        if (timeCount) std::cout << "Elapsed time: " << elapsed.count() << " s\n";
-//        std::cout << ham1 << " pairs found\n\n";
-//    }
-//
-//    if (ham1 && pairsOutput && consoleOutput)
-//    {
-//        std::cout << "Pairs found:\n";
-//
-//        for (auto it1 = std::begin(_ham1_pairs_1), it2 = std::begin(_ham1_pairs_2); it1 != std::end(_ham1_pairs_1); ++it1, ++it2)
-//        {
-//            std::cout << *it1 << " " << *it2 << std::endl;
-//        }
-//
-//        std::cout << std::endl;
-//    }
-//}
 
 ////////////////////////////////////////////////////////////////////////////////
 // hamming distance function
@@ -272,7 +218,7 @@ thrust::device_vector<unsigned int> move_data_to_GPU(const typename std::unorder
 
 ////////////////////////////////////////////////////////////////////////////////
 // HammingOne kernel
-__global__ void find_ham1_GPU(const unsigned int* subwords, unsigned int* pair_flags)
+__global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pair_flags)
 {
     const unsigned int word_idx = threadIdx.x + blockIdx.x * blockDim.x;
     const unsigned int subwords_per_word = SUBWORDS_PER_WORD(WORD_SIZE);
@@ -307,18 +253,119 @@ __global__ void find_ham1_GPU(const unsigned int* subwords, unsigned int* pair_f
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-int main()
+// finding pairs with hamming distance 1 on GPU
+template<size_t N>
+void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
+    thrust::device_vector<unsigned int>& d_pair_flags, \
+    thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
+    const bool timeCount, const bool pairsOutput, const typename std::unordered_set<std::bitset<N>>& _data_uset)
 {
-    bool updated_data_GPU = true;
-    unsigned short menu_choice = 0;
-    size_t pair_flags_size = std::ceil((double)DATA_SIZE * ((double)DATA_SIZE / (double)UINT_BITSIZE));
-    thrust::device_vector<unsigned int> d_subwords;
-    thrust::device_vector<unsigned int> d_pair_flags(pair_flags_size, 0);
-    thrust::host_vector<unsigned int> h_pair_flags;
     unsigned int threads = 512;
     unsigned int blocks = (unsigned int)std::ceil(DATA_SIZE / (double)threads);
     dim3 dimBlock(threads, 1, 1);
     dim3 dimGrid(blocks, 1, 1);
+
+    unsigned int pairs_count = 0;
+    auto d_subwords_ptr = thrust::raw_pointer_cast(d_subwords.begin().base());
+    auto d_pair_flags_ptr = thrust::raw_pointer_cast(d_pair_flags.begin().base());
+    float elapsed;
+    cudaEvent_t start, stop;
+
+    if (timeCount) {
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+    }
+
+    std::cout << "Looking for pairs with hamming distance 1 ...\n";
+
+    if (timeCount) cudaEventRecord(start, 0);
+    find_ham1_GPU_ker<<<dimGrid, dimBlock>>>(d_subwords_ptr, d_pair_flags_ptr);
+    if (timeCount) cudaEventRecord(stop, 0);
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) printf("%s\n", cudaGetErrorString(err));
+
+    cudaDeviceSynchronize();
+
+    if (timeCount) cudaEventElapsedTime(&elapsed, start, stop);
+
+    std::cout << "Finished!\n";
+    if (timeCount) std::cout << "Elapsed time: " << elapsed << " ms\n";
+
+    h_pair_flags = d_pair_flags;
+    for (size_t i = 0; i < pair_flags_size; ++i)
+    {
+        pairs_count += __popcnt(h_pair_flags[i]);
+    }
+
+    std::cout << pairs_count << " pairs found\n\n";
+
+    if (pairs_count && pairsOutput)
+        print_pairs_from_flags<N>(h_pair_flags, pair_flags_size, _data_uset);
+
+    if (timeCount) {
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+
+    thrust::fill(d_pair_flags.begin(), d_pair_flags.end(), 0);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// pairs_flag to pairs output
+template<size_t N>
+void print_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
+    const typename std::unordered_set<std::bitset<N>>& _data_uset)
+{
+    unsigned int subwords_per_word_flags = (unsigned int)std::ceil((double)DATA_SIZE / (double)UINT_BITSIZE);
+
+    std::cout << "Pairs found:\n";
+
+    for (size_t word_idx = 0; word_idx < DATA_SIZE; ++word_idx)
+    {
+        bool flag_found = false;
+        unsigned int* word_flags = new unsigned int[subwords_per_word_flags];
+        for (size_t i = 0; i < subwords_per_word_flags; ++i)
+        {
+            word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
+        }
+        for (size_t i = 0; i < subwords_per_word_flags; ++i)
+            if (word_flags[i]) {
+                flag_found = true;
+                break;
+            }
+        if (!flag_found) continue;
+        for (int i = subwords_per_word_flags-1; i >= 0; --i)
+        {
+            if (!word_flags[i])
+                continue;
+            int flags_set = __popcnt(h_pair_flags[i]);
+            int flag_pos = DATA_SIZE - 2;
+            for (size_t j = 0; j < flags_set;)
+            {
+                if (word_flags[i] % 2) {
+                    std::cout << *std::next(std::begin(_data_uset), word_idx) << " " << *std::next(std::begin(_data_uset), flag_pos) << std::endl;
+                    ++j;
+                }
+                word_flags[i] = word_flags[i] >> 1;
+                --flag_pos;
+            }
+        }
+        delete[] word_flags;
+    }
+
+    std::cout << std::endl;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+int main()
+{
+    bool updated_data_GPU = true;
+    unsigned short menu_choice = 0;
+    size_t pair_flags_size = DATA_SIZE * (std::ceil((double)DATA_SIZE / (double)UINT_BITSIZE));
+    thrust::device_vector<unsigned int> d_subwords;
+    thrust::device_vector<unsigned int> d_pair_flags(pair_flags_size, 0);
+    thrust::host_vector<unsigned int> h_pair_flags;
     std::unordered_set<std::bitset<WORD_SIZE>> data_uset;
     std::vector<std::bitset<WORD_SIZE>> ham1_pairs_1;
     std::vector<std::bitset<WORD_SIZE>> ham1_pairs_2;
@@ -390,11 +437,11 @@ int main()
                             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                             c = std::getc(stdin);
                             if (c == 'y' || c == 'Y') {
-                                find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, true, true);
+                                find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, true);
                                 break;
                             }
                             else if (c == 'n' || c == 'N') {
-                                find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, false, true);
+                                find_ham1<WORD_SIZE>(data_uset, ham1_pairs_1, ham1_pairs_2, true, false);
                                 break;
                             }
                             std::cout << "Please provide a valid choice" << std::endl;
@@ -403,47 +450,21 @@ int main()
                     case 2:
                         if (d_subwords.empty())
                             std::cout << std::endl << "!!! No Data on GPU !!!" << std::endl << std::endl;
-                        else {
-                            unsigned int pairs_count = 0;
-                            auto d_subwords_ptr = thrust::raw_pointer_cast(d_subwords.begin().base());
-                            auto d_pair_flags_ptr = thrust::raw_pointer_cast(d_pair_flags.begin().base());
-                            float elapsed;
-                            cudaEvent_t start, stop;
-                            cudaEventCreate(&start);
-                            cudaEventCreate(&stop);
-
-                            std::cout << "Looking for pairs with hamming distance 1 ...\n";
-
-                            cudaEventRecord(start, 0);
-                            find_ham1_GPU<<<dimGrid, dimBlock>>>(d_subwords_ptr, d_pair_flags_ptr);
-                            cudaEventRecord(stop, 0);
-
-                            cudaError_t err = cudaGetLastError();
-                            if (err != cudaSuccess) printf("%s\n", cudaGetErrorString(err));
-
-                            cudaDeviceSynchronize();
-
-                            cudaEventElapsedTime(&elapsed, start, stop);
-
-                            std::cout << "Finished!\n";
-                            std::cout << "Elapsed time: " << elapsed << " ms\n";
-
-                            h_pair_flags = d_pair_flags;
-                            for (size_t i = 0; i < pair_flags_size; ++i)
-                            {
-                                pairs_count += __popcnt(h_pair_flags[i]);
+                        else do {
+                            std::cout << "Output pairs to console? (y/n):";
+                            std::cin.clear();
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                            c = std::getc(stdin);
+                            if (c == 'y' || c == 'Y') {
+                                find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, true, data_uset);
+                                break;
                             }
-
-                            std::cout << pairs_count << " pairs found\n";
-
-                            std::cout << std::endl;
-
-                            cudaEventDestroy(start);
-                            cudaEventDestroy(stop);
-
-                            thrust::fill(d_pair_flags.begin(), d_pair_flags.end(), 0);
-                            //std::cout << std::endl << "Computing..." << std::endl << std::endl;
-                        }
+                            else if (c == 'n' || c == 'N') {
+                                find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, false, data_uset);
+                                break;
+                            }
+                            std::cout << "Please provide a valid choice" << std::endl;
+                        } while (true);
                         break;
                     case 3:
                         break;
