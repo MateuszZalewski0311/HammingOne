@@ -7,6 +7,7 @@
 #include <chrono>
 #include <algorithm>
 #include <limits>
+#include <fstream>
 
 // includes, cuda
 #include "cuda_runtime.h"
@@ -18,7 +19,7 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 #define WORD_SIZE 24
-#define DATA_SIZE 100000
+#define DATA_SIZE 10000
 #define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
 #define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
@@ -31,6 +32,12 @@ typename std::bitset<N> random_bitset(double p);
 template<size_t N, size_t M>
 void generate_data(typename std::vector<std::bitset<N>>& _data_vec, \
     const bool timeCount = true, const bool consoleOutput = true, const float p = 0.5f);
+template<size_t N, size_t M>
+void load_data(const char* words_filepath, const char* pairs_filepath, typename std::vector<std::bitset<N>>& _data_vec, \
+    typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2);
+template<size_t N, size_t M>
+void save_data(const char* words_filepath, const char* pairs_filepath, const typename std::vector<std::bitset<N>>& _data_vec, \
+    const typename std::vector<std::bitset<N>>& _ham1_pairs_1, const typename std::vector<std::bitset<N>>& _ham1_pairs_2);
 template<size_t N>
 void find_ham1(const typename std::vector<std::bitset<N>>& _data_vec, \
     typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2, \
@@ -38,6 +45,7 @@ void find_ham1(const typename std::vector<std::bitset<N>>& _data_vec, \
 template<size_t N, size_t M>
 thrust::device_vector<unsigned int> move_data_to_GPU(const typename std::vector<std::bitset<N>>& data_vec);
 __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pair_flags, const unsigned int subwords_per_pair_flags);
+//__global__ void count_ones(unsigned int* d_data, size_t pair_flags_size)
 template<size_t N>
 void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     thrust::device_vector<unsigned int>& d_pair_flags, \
@@ -106,9 +114,102 @@ void generate_data(typename std::vector<std::bitset<N>>& _data_vec, \
 
 ////////////////////////////////////////////////////////////////////////////////
 // data loading function
-//
+template<size_t N, size_t M>
+void load_data(const char* words_filepath, const char* pairs_filepath, typename std::vector<std::bitset<N>>& _data_vec, \
+    typename std::vector<std::bitset<N>>& _ham1_pairs_1, typename std::vector<std::bitset<N>>& _ham1_pairs_2)
+{
+    size_t pairs_count = 0;
+    std::string line, number;
+    std::string separator = ";";
+    size_t sep_pos = 0;
+    std::ifstream words_file;
+    words_file.open(words_filepath);
+    if (!words_file.good()) {
+        std::cout << "Error opening words_file\n\n";
+        return;
+    }
+    _data_vec.clear();
+    std::getline(words_file, line);
+    std::getline(words_file, line);
+    sep_pos = line.find(separator);
+    if (sep_pos == std::string::npos) {
+        std::cout << "Error - wrong formatting\n\n";
+        return;
+    }
+    if (std::stoi(line.substr(0, sep_pos)) != N) {
+        std::cout << "Error - WORD_SIZE different\n\n";
+        return;
+    }
+    if (std::stoi(line.substr(sep_pos + 1)) != M) {
+        std::cout << "Error - DATA_SIZE different\n\n";
+        return;
+    }
+    for (size_t i = 0; i < M; ++i) {
+        std::getline(words_file, line);
+        _data_vec.emplace_back(std::bitset<N>(line));
+    }
+
+    std::ifstream pairs_file;
+    pairs_file.open(pairs_filepath);
+    if (!words_file.good()) {
+        std::cout << "Error opening pairs_file\n\n";
+        return;
+    }
+    _ham1_pairs_1.clear();
+    _ham1_pairs_2.clear();
+    std::getline(pairs_file, line);
+    std::getline(pairs_file, line);
+    sep_pos = line.find(separator);
+    if (sep_pos == std::string::npos) {
+        std::cout << "Error - wrong formatting\n\n";
+        return;
+    }
+    if (std::stoi(line.substr(0, sep_pos)) != N) {
+        std::cout << "Error - WORD_SIZE different\n\n";
+        return;
+    }
+    pairs_count = std::stoi(line.substr(sep_pos + 1));
+    for (size_t i = 0; i < pairs_count; ++i) {
+        std::getline(pairs_file, line);
+        sep_pos = line.find(separator);
+        _ham1_pairs_1.emplace_back(std::bitset<N>(line.substr(0, sep_pos)));
+        _ham1_pairs_2.emplace_back(std::bitset<N>(line.substr(sep_pos + 1)));
+    }
+    pairs_file.close();
+
+    std::cout << "Loading Data successful!" << std::endl << std::endl;
+}
 ////////////////////////////////////////////////////////////////////////////////
 // data saving function
+template<size_t N, size_t M>
+void save_data(const char* words_filepath, const char* pairs_filepath, const typename std::vector<std::bitset<N>>& _data_vec, \
+    const typename std::vector<std::bitset<N>>& _ham1_pairs_1, const typename std::vector<std::bitset<N>>& _ham1_pairs_2)
+{
+    if (_data_vec.empty()) {
+        std::cout << "Words vector is empty";
+    }
+    std::ofstream words_file;
+    std::remove(words_filepath);
+    words_file.open(words_filepath);
+    words_file << "WORD_SIZE;DATA_SIZE\n";
+    words_file << N << ';' << M << "\n";
+    for (size_t i = 0; i < M; ++i)
+        words_file << _data_vec[i].to_string() << "\n";
+    words_file.close();
+
+    if (_ham1_pairs_1.empty() || _ham1_pairs_2.empty())
+        return;
+    std::ofstream pairs_file;
+    std::remove(pairs_filepath);
+    pairs_file.open(pairs_filepath);
+    pairs_file << "WORD_SIZE;PAIRS_COUNT\n";
+    pairs_file << N << ';' << _ham1_pairs_1.size() << "\n";
+    for (size_t i = 0; i < _ham1_pairs_1.size(); ++i)
+        pairs_file << _ham1_pairs_1[i].to_string() << ';' << _ham1_pairs_2[i].to_string() << "\n";
+    pairs_file.close();
+
+    std::cout << "Saving Data successful!" << std::endl << std::endl;
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // finding pairs with hamming distance 1 on CPU
@@ -121,6 +222,9 @@ void find_ham1(const typename std::vector<std::bitset<N>>& _data_vec, \
     std::chrono::duration<double> elapsed;
 
     std::cout << "Looking for pairs with hamming distance 1 ...\n";
+
+    _ham1_pairs_1.clear();
+    _ham1_pairs_2.clear();
 
     // Record start time
     if (timeCount) start = std::chrono::high_resolution_clock::now();
@@ -262,6 +366,16 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// Counting kernel - very similar time on CPU
+//__global__ void count_ones(unsigned int* d_data, size_t pair_flags_size)
+//{
+//    const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//    if (tid >= pair_flags_size)
+//        return;
+//    d_data[tid] = __popc(d_data[tid]);
+//}
+
+////////////////////////////////////////////////////////////////////////////////
 // finding pairs with hamming distance 1 on GPU
 template<size_t N>
 void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
@@ -274,7 +388,7 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     dim3 dimBlock(threads, 1, 1);
     dim3 dimGrid(blocks, 1, 1);
 
-    unsigned int pairs_count = 0;
+    unsigned int pairs_count = 0, pairs_count_GPU = 0;
     const unsigned int subwords_per_pair_flags = pair_flags_size / DATA_SIZE;
     auto d_subwords_ptr = thrust::raw_pointer_cast(d_subwords.begin().base());
     auto d_pair_flags_ptr = thrust::raw_pointer_cast(d_pair_flags.begin().base());
@@ -307,8 +421,22 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     {
         pairs_count += __popcnt(h_pair_flags[i]);
     }
-
     std::cout << pairs_count << " pairs found\n\n";
+
+    // Te time is basically the same on CPU
+    //int threads2 = 512;
+    //int blocks2 = (unsigned int)std::ceil(pair_flags_size / (double)threads);
+    //dim3 dimBlock2(threads2, 1, 1);
+    //dim3 dimGrid2(blocks2, 1, 1);
+    //count_ones<<<dimGrid2, dimBlock2>>>(thrust::raw_pointer_cast(d_pair_flags.begin().base()), pair_flags_size);
+    //cudaDeviceSynchronize();
+    //h_pair_flags = d_pair_flags;
+    //for (size_t i = 0; i < pair_flags_size; ++i)
+    //{
+    //    pairs_count_GPU += h_pair_flags[i];
+    //}
+    //
+    //std::cout << pairs_count_GPU << " pairs found on GPU\n\n";
 
     if (pairs_count && pairsOutput)
         print_pairs_from_flags<N>(h_pair_flags, pair_flags_size, _data_vec);
@@ -416,7 +544,32 @@ int main()
             updated_data_GPU = false;
             break;
         case 2:
-            std::cout << std::endl << "Not implemented yet :(" << std::endl << std::endl;
+            std::cout << std::endl;
+            while (menu_choice != 3)
+            {
+                std::cout << "1. Save Data" << std::endl;
+                std::cout << "2. Load Data" << std::endl;
+                std::cout << "3. Go Back" << std::endl;
+                std::cout << "Choice: ";
+                std::cin >> menu_choice;
+                std::cout << std::endl;
+                switch (menu_choice)
+                {
+                case 1:
+                    save_data<WORD_SIZE, DATA_SIZE>("./words_data.csv", "./pairs_data.csv", data_vec, ham1_pairs_1, ham1_pairs_2);
+                    break;
+                case 2:
+                    load_data<WORD_SIZE, DATA_SIZE>("./words_data.csv", "./pairs_data.csv", data_vec, ham1_pairs_1, ham1_pairs_2);
+                    updated_data_GPU = false;
+                    break;
+                case 3:
+                    break;
+                default:
+                    std::cout << "Please provide a valid choice" << std::endl << std::endl;
+                    break;
+                }
+            }
+            menu_choice = 2;
             break;
         case 3:
             if (!data_vec.empty()) {
