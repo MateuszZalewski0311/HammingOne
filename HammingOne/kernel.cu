@@ -18,8 +18,8 @@
 #include <thrust/device_vector.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define WORD_SIZE 24
-#define DATA_SIZE 10000
+#define WORD_SIZE 100
+#define DATA_SIZE 100000
 #define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
 #define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
@@ -133,15 +133,15 @@ void load_data(const char* words_filepath, const char* pairs_filepath, typename 
     std::getline(words_file, line);
     sep_pos = line.find(separator);
     if (sep_pos == std::string::npos) {
-        std::cout << "Error - wrong formatting\n\n";
+        std::cout << "Error(words_file) - wrong formatting\n\n";
         return;
     }
     if (std::stoi(line.substr(0, sep_pos)) != N) {
-        std::cout << "Error - WORD_SIZE different\n\n";
+        std::cout << "Error(words_file) - WORD_SIZE different\n\n";
         return;
     }
     if (std::stoi(line.substr(sep_pos + 1)) != M) {
-        std::cout << "Error - DATA_SIZE different\n\n";
+        std::cout << "Error(words_file) - DATA_SIZE different\n\n";
         return;
     }
     for (size_t i = 0; i < M; ++i) {
@@ -161,11 +161,11 @@ void load_data(const char* words_filepath, const char* pairs_filepath, typename 
     std::getline(pairs_file, line);
     sep_pos = line.find(separator);
     if (sep_pos == std::string::npos) {
-        std::cout << "Error - wrong formatting\n\n";
+        std::cout << "Error(pairs_file) - wrong formatting\n\n";
         return;
     }
     if (std::stoi(line.substr(0, sep_pos)) != N) {
-        std::cout << "Error - WORD_SIZE different\n\n";
+        std::cout << "Error(pairs_file) - WORD_SIZE different\n\n";
         return;
     }
     pairs_count = std::stoi(line.substr(sep_pos + 1));
@@ -197,8 +197,10 @@ void save_data(const char* words_filepath, const char* pairs_filepath, const typ
         words_file << _data_vec[i].to_string() << "\n";
     words_file.close();
 
-    if (_ham1_pairs_1.empty() || _ham1_pairs_2.empty())
+    if (_ham1_pairs_1.empty() || _ham1_pairs_2.empty()) {
+        std::cout << "Saving Data successful!" << std::endl << std::endl;
         return;
+    }
     std::ofstream pairs_file;
     std::remove(pairs_filepath);
     pairs_file.open(pairs_filepath);
@@ -388,7 +390,7 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     dim3 dimBlock(threads, 1, 1);
     dim3 dimGrid(blocks, 1, 1);
 
-    unsigned int pairs_count = 0, pairs_count_GPU = 0;
+    unsigned int pairs_count = 0; //pairs_count_GPU = 0;
     const unsigned int subwords_per_pair_flags = pair_flags_size / DATA_SIZE;
     auto d_subwords_ptr = thrust::raw_pointer_cast(d_subwords.begin().base());
     auto d_pair_flags_ptr = thrust::raw_pointer_cast(d_pair_flags.begin().base());
