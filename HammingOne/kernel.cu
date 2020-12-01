@@ -18,8 +18,8 @@
 #include <thrust/device_vector.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define WORD_SIZE 100
-#define DATA_SIZE 10000
+#define WORD_SIZE 1000
+#define DATA_SIZE 100000
 #define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
 #define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
@@ -53,10 +53,13 @@ template<size_t N>
 void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     thrust::device_vector<unsigned int>& d_pair_flags, \
     thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
-    const bool timeCount, const bool pairsOutput, const typename std::vector<std::bitset<N>>& _data_vec);
+    const typename std::vector<std::bitset<N>>& data_vec, typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs, \
+    const bool save_to_file, const bool timeCount = true, const bool pairsOutput = false, const bool checkData = false);
 template<size_t N>
 void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
-    const typename std::vector<std::bitset<N>>& data_vec);
+    const typename std::vector<std::bitset<N>>& data_vec, \
+    const typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs, \
+    const bool checkData, const bool pairsOutput, const bool saveToFile = false, const char* filepath = "", unsigned int pairs_count = 0);
 
 ////////////////////////////////////////////////////////////////////////////////
 // word generating function
@@ -451,8 +454,8 @@ template<size_t N>
 void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     thrust::device_vector<unsigned int>& d_pair_flags, \
     thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
-    const bool timeCount, const bool pairsOutput, const bool checkData, \
-    const typename std::vector<std::bitset<N>>& data_vec, typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs)
+    const typename std::vector<std::bitset<N>>& data_vec, typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs, \
+    const bool save_to_file, const bool timeCount, const bool pairsOutput, const bool checkData)
 {
     unsigned int threads = 512;
     unsigned int blocks = (unsigned int)std::ceil(DATA_SIZE / (double)threads);
@@ -507,8 +510,12 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     
     std::cout << pairs_count_GPU << " pairs found\n\n";
 
-    if (pairs_count_GPU)
-        process_pairs_from_flags<N>(h_pair_flags, pair_flags_size, data_vec, ham1_pairs, checkData, pairsOutput);
+    if (pairs_count_GPU) {
+        if (save_to_file)
+            process_pairs_from_flags<N>(h_pair_flags, pair_flags_size, data_vec, ham1_pairs, checkData, pairsOutput, true, "./pairs_GPU.csv", pairs_count_GPU);
+        else
+            process_pairs_from_flags<N>(h_pair_flags, pair_flags_size, data_vec, ham1_pairs, checkData, pairsOutput);
+    }
     else
         process_pairs_from_flags<N>(h_pair_flags, pair_flags_size, data_vec, ham1_pairs, checkData, false);
 
@@ -526,60 +533,131 @@ template<size_t N>
 void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, size_t pair_flags_size, \
     const typename std::vector<std::bitset<N>>& data_vec, \
     const typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs, \
-    const bool checkData, const bool pairsOutput)
+    const bool checkData, const bool pairsOutput, const bool saveToFile, const char* filepath, unsigned int pairs_count)
 {
-    if (!checkData && !pairsOutput) return;
-    bool dataCorrect = true;
     const unsigned int subwords_per_word_flags = pair_flags_size / DATA_SIZE;
 
-    if (pairsOutput) std::cout << "Pairs found:\n";
+    std::chrono::steady_clock::time_point start, finish;
+    std::chrono::duration<double> elapsed;
 
-    for (size_t word_idx = 0; word_idx < DATA_SIZE; ++word_idx)
-    {
-        bool flag_found = false;
-        unsigned int* word_flags = new unsigned int[subwords_per_word_flags];
-        for (size_t i = 0; i < subwords_per_word_flags; ++i)
+    if (saveToFile) {
+        std::ofstream file;
+        std::remove(filepath);
+        
+        // Record start time
+        start = std::chrono::high_resolution_clock::now();
+        
+        file.open(filepath);
+        file << "WORD_SIZE;PAIRS_COUNT\n";
+        file << N << ';' << pairs_count << "\n";
+
+
+        for (size_t word_idx = 0; word_idx < DATA_SIZE; ++word_idx)
         {
-            word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
-        }
-        for (size_t i = 0; i < subwords_per_word_flags; ++i)
-            if (word_flags[i]) {
-                flag_found = true;
-                break;
-            }
-        if (!flag_found) continue;
-        for (int i = subwords_per_word_flags-1; i >= 0; --i)
-        {
-            if (!word_flags[i])
-                continue;
-            int flags_set = __popcnt(word_flags[i]);
-            int flag_pos = (i+1) * UINT_BITSIZE - 1;
-            size_t j = 0;
-            while (j < flags_set)
+            bool flag_found = false;
+            unsigned int* word_flags = new unsigned int[subwords_per_word_flags];
+            for (size_t i = 0; i < subwords_per_word_flags; ++i)
             {
-                if (word_flags[i] % 2) {
-                    if (checkData) {
-                        std::pair<std::bitset<N>, std::bitset<N>> pair = std::make_pair<std::bitset<N>, std::bitset<N>>(std::bitset<N>(data_vec[word_idx].to_string()), std::bitset<N>(data_vec[flag_pos].to_string()));
-                        if (std::end(ham1_pairs) == std::find(std::begin(ham1_pairs), std::end(ham1_pairs), pair)) {
-                            std::cout << "No matching pair found in CPU Data" << std::endl;
-                            dataCorrect = false;
-                        }
-                    }
-                    if (pairsOutput) std::cout << data_vec[word_idx] << " " << data_vec[flag_pos] << std::endl;
-                    ++j;
-                }
-                word_flags[i] = word_flags[i] >> 1;
-                --flag_pos;
+                word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
             }
+            for (size_t i = 0; i < subwords_per_word_flags; ++i)
+                if (word_flags[i]) {
+                    flag_found = true;
+                    break;
+                }
+            if (!flag_found) continue;
+            for (int i = subwords_per_word_flags - 1; i >= 0; --i)
+            {
+                if (!word_flags[i])
+                    continue;
+                int flags_set = __popcnt(word_flags[i]);
+                int flag_pos = (i + 1) * UINT_BITSIZE - 1;
+                size_t j = 0;
+                while (j < flags_set)
+                {
+                    if (word_flags[i] % 2) {
+                        file << data_vec[word_idx].to_string() << ';' << data_vec[flag_pos].to_string() << "\n";
+                        ++j;
+                    }
+                    word_flags[i] = word_flags[i] >> 1;
+                    --flag_pos;
+                }
+            }
+            delete[] word_flags;
         }
-        delete[] word_flags;
-    }
 
-    if (checkData && dataCorrect) {
-        if (pairsOutput) std::cout << std::endl;
-        std::cout << "GPU Data is consistent with CPU Data" << std::endl << std::endl;
+        file.close();
+
+        // Record end time
+        finish = std::chrono::high_resolution_clock::now();
+        elapsed = finish - start;
+
+        std::cout << "Saving Data successful!" << std::endl;
+
+        std::cout << "Elapsed time: " << elapsed.count() << " s" << std::endl << std::endl;
     }
-    else if (pairsOutput || !dataCorrect) std::cout << std::endl;
+    else {
+        if (!checkData && !pairsOutput) return;
+        bool dataCorrect = true;
+
+        if (pairsOutput) std::cout << "Pairs found:\n";
+
+        // Record start time
+        start = std::chrono::high_resolution_clock::now();
+
+        for (size_t word_idx = 0; word_idx < DATA_SIZE; ++word_idx)
+        {
+            bool flag_found = false;
+            unsigned int* word_flags = new unsigned int[subwords_per_word_flags];
+            for (size_t i = 0; i < subwords_per_word_flags; ++i)
+            {
+                word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
+            }
+            for (size_t i = 0; i < subwords_per_word_flags; ++i)
+                if (word_flags[i]) {
+                    flag_found = true;
+                    break;
+                }
+            if (!flag_found) continue;
+            for (int i = subwords_per_word_flags - 1; i >= 0; --i)
+            {
+                if (!word_flags[i])
+                    continue;
+                int flags_set = __popcnt(word_flags[i]);
+                int flag_pos = (i + 1) * UINT_BITSIZE - 1;
+                size_t j = 0;
+                while (j < flags_set)
+                {
+                    if (word_flags[i] % 2) {
+                        if (checkData) {
+                            std::pair<std::bitset<N>, std::bitset<N>> pair = std::make_pair<std::bitset<N>, std::bitset<N>>(std::bitset<N>(data_vec[word_idx].to_string()), std::bitset<N>(data_vec[flag_pos].to_string()));
+                            if (std::end(ham1_pairs) == std::find(std::begin(ham1_pairs), std::end(ham1_pairs), pair)) {
+                                std::cout << "No matching pair found in CPU Data" << std::endl;
+                                dataCorrect = false;
+                            }
+                        }
+                        if (pairsOutput) std::cout << data_vec[word_idx] << " " << data_vec[flag_pos] << std::endl;
+                        ++j;
+                    }
+                    word_flags[i] = word_flags[i] >> 1;
+                    --flag_pos;
+                }
+            }
+            delete[] word_flags;
+        }
+        
+        // Record end time
+        finish = std::chrono::high_resolution_clock::now();
+        elapsed = finish - start;
+
+        if (checkData && dataCorrect) {
+            if (pairsOutput) std::cout << std::endl;
+            std::cout << "GPU Data is consistent with CPU Data" << std::endl << std::endl;
+        }
+        else if (pairsOutput || !dataCorrect) std::cout << std::endl;
+
+        if (checkData) std::cout << "Elapsed time: " << elapsed.count() << " s" << std::endl << std::endl;
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -668,10 +746,10 @@ int main()
                 switch (menu_choice)
                 {
                 case 1:
-                    save_data<WORD_SIZE, DATA_SIZE>("./words_data.csv", "./pairs_data.csv", data_vec, ham1_pairs);
+                    save_data<WORD_SIZE, DATA_SIZE>("./words_data.csv", "./pairs_CPU.csv", data_vec, ham1_pairs);
                     break;
                 case 2:
-                    load_data<WORD_SIZE, DATA_SIZE>("./words_data.csv", "./pairs_data.csv", data_vec, ham1_pairs);
+                    load_data<WORD_SIZE, DATA_SIZE>("./words_data.csv", "./pairs_CPU.csv", data_vec, ham1_pairs);
                     updated_data_GPU = false;
                     break;
                 case 3:
@@ -731,11 +809,28 @@ int main()
                     }
                     case 2:
                     {
+                        bool save_to_file = false;
                         bool out_to_console = false;
                         char c;
                         if (d_subwords.empty())
                             std::cout << std::endl << "!!! No Data on GPU !!!" << std::endl << std::endl;
                         else {
+                            do {
+                                std::cout << "Save pairs to file? (y/n):";
+                                std::cin.clear();
+                                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                                c = std::getc(stdin);
+                                if (c == 'y' || c == 'Y') {
+                                    save_to_file = true;
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, save_to_file);
+                                    break;
+                                }
+                                else if (c == 'n' || c == 'N') {
+                                    break;
+                                }
+                                std::cout << "Please provide a valid choice" << std::endl;
+                            } while (true);
+                            if (save_to_file) break;
                             do {
                                 std::cout << "Output pairs to console? (y/n):";
                                 std::cin.clear();
@@ -757,11 +852,11 @@ int main()
                                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                                 c = std::getc(stdin);
                                 if (c == 'y' || c == 'Y') {
-                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, out_to_console, true, data_vec, ham1_pairs);
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, true, out_to_console, true);
                                     break;
                                 }
                                 else if (c == 'n' || c == 'N') {
-                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, true, out_to_console, false, data_vec, ham1_pairs);
+                                    find_ham1_GPU<WORD_SIZE>(d_subwords, d_pair_flags, h_pair_flags, pair_flags_size, data_vec, ham1_pairs, true, out_to_console, false);
                                     break;
                                 }
                                 std::cout << "Please provide a valid choice" << std::endl;
