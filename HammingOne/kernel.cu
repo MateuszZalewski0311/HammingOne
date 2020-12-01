@@ -18,8 +18,8 @@
 #include <thrust/device_vector.h>
 
 ////////////////////////////////////////////////////////////////////////////////
-#define WORD_SIZE 24
-#define DATA_SIZE 10000
+#define WORD_SIZE 1000
+#define DATA_SIZE 100000
 #define UINT_BITSIZE (unsigned int)(8*sizeof(unsigned int))
 #define SUBWORDS_PER_WORD(N) (unsigned int)(std::ceil((float)N / (sizeof(unsigned int) * 8.0f)))
 
@@ -30,8 +30,11 @@ unsigned int hamming_distance(const typename std::bitset<N>& A, const typename s
 template<size_t N>
 typename std::bitset<N> random_bitset(double p);
 template<size_t N, size_t M>
-void generate_data(typename std::vector<std::bitset<N>>& _data_vec, \
+void generate_random_data(typename std::vector<std::bitset<N>>& _data_vec, \
     const bool timeCount = true, const bool consoleOutput = true, const float p = 0.5f);
+template<size_t N, size_t M>
+void generate_predictable_data(typename std::vector<std::bitset<N>>& _data_vec, \
+    const bool timeCount = true, const bool consoleOutput = true);
 template<size_t N, size_t M>
 void load_data(const char* words_filepath, const char* pairs_filepath, typename std::vector<std::bitset<N>>& _data_vec, \
     typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs);
@@ -73,9 +76,26 @@ typename std::bitset<N> random_bitset(double p)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// fins MSB index in bitset
+template<size_t N>
+unsigned int MSB(std::bitset<N> bitset)
+{
+    if (!bitset.to_ulong())
+        return 0;
+
+    int msb = 0;
+    while (bitset.to_ulong() != 1)
+    {
+        bitset >>= 1;
+        ++msb;
+    }
+    return msb;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // data generating function
 template<size_t N, size_t M>
-void generate_data(typename std::vector<std::bitset<N>>& _data_vec, \
+void generate_random_data(typename std::vector<std::bitset<N>>& _data_vec, \
     const bool timeCount, const bool consoleOutput, const float p)
 {
     std::unordered_set<std::bitset<N>> data_uset;
@@ -107,6 +127,57 @@ void generate_data(typename std::vector<std::bitset<N>>& _data_vec, \
     {
         if (timeCount) elapsed = finish - start;
         std::cout << "Data Generation Finished!\n";
+        if (timeCount) std::cout << "Elapsed time: " << elapsed.count() << " s\n";
+        std::cout << std::endl;
+    }
+}
+
+template<size_t N, size_t M>
+void generate_predictable_data(typename std::vector<std::bitset<N>>& _data_vec, \
+    const bool timeCount, const bool consoleOutput)
+{
+    std::unordered_set<std::bitset<N>> data_uset;
+    data_uset.reserve(M);
+
+    std::chrono::steady_clock::time_point start, finish;
+    std::chrono::duration<double> elapsed;
+
+    unsigned int starting_word_counter = 0;
+    std::bitset<N> starting_word;
+    std::bitset<N> current_word;
+
+    if (consoleOutput) std::cout << "Beginning Data Generation...\n";
+
+    // Record start time
+    if (consoleOutput && timeCount) start = std::chrono::high_resolution_clock::now();
+
+    for (size_t i = 0; i < M;)
+    {
+        starting_word = std::bitset<N>(starting_word_counter++);
+        if (data_uset.emplace(starting_word).second) {
+            _data_vec.emplace_back(starting_word);
+            ++i;
+        }
+        for (size_t j = starting_word.to_ulong() == 0 ? 0 : MSB(starting_word) + 1; j < N && i < M; ++j)
+        {
+            current_word = std::bitset<N>(0);
+            current_word[j] = 1;
+            current_word = current_word ^ starting_word;
+            if (data_uset.emplace(current_word).second) {
+                _data_vec.emplace_back(current_word);
+                ++i;
+            }
+        }
+    }
+
+    // Record end time
+    if (consoleOutput && timeCount) finish = std::chrono::high_resolution_clock::now();
+
+    if (consoleOutput)
+    {
+        if (timeCount) elapsed = finish - start;
+        std::cout << "Data Generation Finished!\n";
+        if (_data_vec.size() != M) std::cout << "Wrong Data Size: " << _data_vec.size() << std::endl;
         if (timeCount) std::cout << "Elapsed time: " << elapsed.count() << " s\n";
         std::cout << std::endl;
     }
@@ -503,7 +574,7 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
         delete[] word_flags;
     }
 
-    if (dataCorrect) std::cout << "GPU Data is consistent with CPU Data" << std::endl << std::endl;
+    if (checkData && dataCorrect) std::cout << "GPU Data is consistent with CPU Data" << std::endl << std::endl;
 
     if (pairsOutput || !dataCorrect) std::cout << std::endl;
 }
@@ -543,14 +614,43 @@ int main()
         switch (menu_choice)
         {
         case 1:
-            if (!data_vec.empty())
-                data_vec.clear();
-            data_vec.reserve(DATA_SIZE);
-            if (!ham1_pairs.empty())
-                ham1_pairs.clear();
             std::cout << std::endl;
-            generate_data<WORD_SIZE, DATA_SIZE>(data_vec);
-            updated_data_GPU = false;
+            while (menu_choice != 3)
+            {
+                std::cout << "1. Generate Random Data" << std::endl;
+                std::cout << "2. Generate Predictable Data" << std::endl;
+                std::cout << "3. Go Back" << std::endl;
+                std::cout << "Choice: ";
+                std::cin >> menu_choice;
+                std::cout << std::endl;
+                switch (menu_choice)
+                {
+                case 1:
+                    if (!data_vec.empty())
+                        data_vec.clear();
+                    data_vec.reserve(DATA_SIZE);
+                    if (!ham1_pairs.empty())
+                        ham1_pairs.clear();
+                    generate_random_data<WORD_SIZE, DATA_SIZE>(data_vec);
+                    updated_data_GPU = false;
+                    break;
+                case 2:
+                    if (!data_vec.empty())
+                        data_vec.clear();
+                    data_vec.reserve(DATA_SIZE);
+                    if (!ham1_pairs.empty())
+                        ham1_pairs.clear();
+                    generate_predictable_data<WORD_SIZE, DATA_SIZE>(data_vec);
+                    updated_data_GPU = false;
+                    break;
+                case 3:
+                    break;
+                default:
+                    std::cout << "Please provide a valid choice" << std::endl << std::endl;
+                    break;
+                }
+            }
+            menu_choice = 1;
             break;
         case 2:
             std::cout << std::endl;
