@@ -29,6 +29,8 @@ template<size_t N>
 unsigned int hamming_distance(const typename std::bitset<N>& A, const typename std::bitset<N>& B);
 template<size_t N>
 typename std::bitset<N> random_bitset(double p);
+template<size_t N>
+unsigned int MSB(std::bitset<N> bitset);
 template<size_t N, size_t M>
 void generate_random_data(typename std::vector<std::bitset<N>>& _data_vec, \
     const bool timeCount = true, const bool consoleOutput = true, const float p = 0.5f);
@@ -62,7 +64,7 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
     const bool checkData, const bool pairsOutput, const bool saveToFile = false, const char* filepath = "", unsigned int pairs_count = 0);
 
 ////////////////////////////////////////////////////////////////////////////////
-// word generating function
+// word generating function - from bernoulli distribution
 template<size_t N> // p = 0.5 gives equal chance for 0's and 1's to occur
 typename std::bitset<N> random_bitset(double p) 
 {
@@ -139,7 +141,7 @@ template<size_t N, size_t M>
 void generate_predictable_data(typename std::vector<std::bitset<N>>& _data_vec, \
     const bool timeCount, const bool consoleOutput)
 {
-    std::unordered_set<std::bitset<N>> data_uset;
+    std::unordered_set<std::bitset<N>> data_uset; // used for uniqueness
     data_uset.reserve(M);
 
     std::chrono::steady_clock::time_point start, finish;
@@ -157,15 +159,22 @@ void generate_predictable_data(typename std::vector<std::bitset<N>>& _data_vec, 
     for (size_t i = 0; i < M;)
     {
         starting_word = std::bitset<N>(starting_word_counter++);
-        if (data_uset.emplace(starting_word).second) {
+        
+        // Check if starting word can be placed into vector
+        if (data_uset.emplace(starting_word).second) 
+        {
             _data_vec.emplace_back(starting_word);
             ++i;
         }
+
+        // Words are created by setting one of the bits before MSB to 1
         for (size_t j = starting_word.to_ulong() == 0 ? 0 : MSB(starting_word) + 1; j < N && i < M; ++j)
         {
             current_word = std::bitset<N>(0);
             current_word[j] = 1;
             current_word = current_word ^ starting_word;
+
+            // Check if current word can be placed into vector
             if (data_uset.emplace(current_word).second) {
                 _data_vec.emplace_back(current_word);
                 ++i;
@@ -196,14 +205,21 @@ void load_data(const char* words_filepath, const char* pairs_filepath, typename 
     std::string line, number;
     std::string separator = ";";
     size_t sep_pos = 0;
+
     std::ifstream words_file;
     words_file.open(words_filepath);
+
     if (!words_file.good()) {
         std::cout << "Error opening words_file\n\n";
         return;
     }
+
     _data_vec.clear();
+
+    // discard first line(header)
     std::getline(words_file, line);
+
+    //check if WORD_SIZE/DATA_SIZE the same as defined in program
     std::getline(words_file, line);
     sep_pos = line.find(separator);
     if (sep_pos == std::string::npos) {
@@ -218,6 +234,8 @@ void load_data(const char* words_filepath, const char* pairs_filepath, typename 
         std::cout << "Error(words_file) - DATA_SIZE different\n\n";
         return;
     }
+
+    // main words_file loop
     for (size_t i = 0; i < M; ++i) {
         std::getline(words_file, line);
         _data_vec.emplace_back(std::bitset<N>(line));
@@ -229,8 +247,13 @@ void load_data(const char* words_filepath, const char* pairs_filepath, typename 
         std::cout << "Error opening pairs_file\n\n";
         return;
     }
+
     ham1_pairs.clear();
+
+    // discard first line(header)
     std::getline(pairs_file, line);
+
+    //check if WORD_SIZE the same as defined in program
     std::getline(pairs_file, line);
     sep_pos = line.find(separator);
     if (sep_pos == std::string::npos) {
@@ -241,12 +264,16 @@ void load_data(const char* words_filepath, const char* pairs_filepath, typename 
         std::cout << "Error(pairs_file) - WORD_SIZE different\n\n";
         return;
     }
+
     pairs_count = std::stoi(line.substr(sep_pos + 1));
+
+    // main pairs_file loop
     for (size_t i = 0; i < pairs_count; ++i) {
         std::getline(pairs_file, line);
         sep_pos = line.find(separator);
         ham1_pairs.emplace_back(std::make_pair<std::bitset<N>, std::bitset<N>>(std::bitset<N>(line.substr(0, sep_pos)), std::bitset<N>(line.substr(sep_pos + 1))));
     }
+
     pairs_file.close();
 
     std::cout << "Loading Data successful!" << std::endl << std::endl;
@@ -259,28 +286,39 @@ void save_data(const char* words_filepath, const char* pairs_filepath, const typ
     const typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs)
 {
     if (_data_vec.empty()) {
-        std::cout << "Words vector is empty";
+        std::cout << "Words vector is empty!";
+        return;
     }
+
     std::ofstream words_file;
     std::remove(words_filepath);
     words_file.open(words_filepath);
+
     words_file << "WORD_SIZE;DATA_SIZE\n";
     words_file << N << ';' << M << "\n";
+
+    // main words_file loop
     for (size_t i = 0; i < M; ++i)
         words_file << _data_vec[i].to_string() << "\n";
+
     words_file.close();
 
     if (ham1_pairs.empty()) {
         std::cout << "Saving Data successful!" << std::endl << std::endl;
         return;
     }
+
     std::ofstream pairs_file;
     std::remove(pairs_filepath);
     pairs_file.open(pairs_filepath);
+
     pairs_file << "WORD_SIZE;PAIRS_COUNT\n";
     pairs_file << N << ';' << ham1_pairs.size() << "\n";
+
+    // main pairs_file loop
     for (size_t i = 0; i < ham1_pairs.size(); ++i)
         pairs_file << ham1_pairs[i].first.to_string() << ';' << ham1_pairs[i].second.to_string() << "\n";
+
     pairs_file.close();
 
     std::cout << "Saving Data successful!" << std::endl << std::endl;
@@ -360,22 +398,26 @@ thrust::device_vector<unsigned int> move_data_to_GPU(const typename std::vector<
     // Record start time
     start = std::chrono::high_resolution_clock::now();
 
-    int i = 0;
+    int i = 0; // index in h_words
+
     if (N < UINT_BITSIZE)
     {
         for (const auto& word_bitset : data_vec)
         {
-            std::string subword_str = word_bitset.to_string().substr(0, N);
-            for (size_t subword_str_size = N; subword_str_size < UINT_BITSIZE; ++subword_str_size)
-                subword_str += "0";
-            unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
-            h_words[i++] = subword;
-            continue;
+            std::string word_str = word_bitset.to_string().substr(0, N);
+
+            // add padding bits
+            for (size_t word_str_size = N; word_str_size < UINT_BITSIZE; ++word_str_size)
+                word_str += "0";
+
+            unsigned int word = (unsigned int)(std::bitset<N>(word_str).to_ulong());
+            h_words[i++] = word;
         }
     }
+
     else
     {
-        size_t j = 0;
+        size_t j = 0; // currently processed subwords
         for (; j + UINT_BITSIZE < N; j += UINT_BITSIZE)
         {
             for (const auto& word_bitset : data_vec)
@@ -385,6 +427,7 @@ thrust::device_vector<unsigned int> move_data_to_GPU(const typename std::vector<
                 h_words[i++] = subword;
             }
         }
+
         if (j + UINT_BITSIZE != N) // last subword smaller than UINT_BITSIZE
         {
             for (const auto& word_bitset : data_vec)
@@ -415,24 +458,24 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
     const unsigned int word_idx = threadIdx.x + blockIdx.x * blockDim.x;
     const unsigned int subwords_per_word = SUBWORDS_PER_WORD(WORD_SIZE);
 
-    if (word_idx >= DATA_SIZE)
-        return;
-
-    unsigned int* word = new unsigned int[subwords_per_word];
-    for (size_t i = 0; i < subwords_per_word; ++i)
-    {
-        word[i] = subwords[word_idx + DATA_SIZE * i];
-    }
+    if (word_idx >= DATA_SIZE) return;
 
     unsigned int hamming_distance, flag_subword_offset, flag_in_subword;
+    unsigned int* word = new unsigned int[subwords_per_word];
 
+    // Get subwords of current word
+    for (size_t i = 0; i < subwords_per_word; ++i)
+        word[i] = subwords[word_idx + DATA_SIZE * i];
+
+    // comparison_idx - index of word that current word(word[]) is being comapred to
     for (size_t comparison_idx = word_idx + 1; comparison_idx < DATA_SIZE; ++comparison_idx)
     {
         hamming_distance = 0;
+
         for (size_t i = 0; i < subwords_per_word && hamming_distance < 2; ++i)
-        {
             hamming_distance += __popc(word[i] ^ subwords[comparison_idx + DATA_SIZE * i]);
-        }
+
+        // each word has at least DATA_SIZE flags, flags for matches are set on match's index in CPU data
         if (hamming_distance && !(hamming_distance >> 1)) // true when hamming_distance == 1
         {
             flag_subword_offset = comparison_idx / UINT_BITSIZE;
@@ -449,8 +492,8 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
 __global__ void count_ones(unsigned int* d_data, size_t pair_flags_size)
 {
     const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (tid >= pair_flags_size)
-        return;
+    if (tid >= pair_flags_size) return;
+
     d_data[tid] = __popc(d_data[tid]);
 }
 
@@ -463,17 +506,24 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     const typename std::vector<std::bitset<N>>& data_vec, typename std::vector<std::pair<std::bitset<N>, std::bitset<N>>>& ham1_pairs, \
     const bool save_to_file, const bool timeCount, const bool pairsOutput, const bool checkData)
 {
+    // vars with 2 are for kernel processing flags
     unsigned int threads = 512;
+    unsigned int threads2 = 512;
     unsigned int blocks = (unsigned int)std::ceil(DATA_SIZE / (double)threads);
+    unsigned int blocks2 = (unsigned int)std::ceil(pair_flags_size / (double)threads);
     dim3 dimBlock(threads, 1, 1);
     dim3 dimGrid(blocks, 1, 1);
+    dim3 dimBlock2(threads2, 1, 1);
+    dim3 dimGrid2(blocks2, 1, 1);
 
-    unsigned int pairs_count_GPU = 0; //pairs_count = 0;
+    float elapsed;
+    cudaEvent_t start, stop;
+
     const unsigned int subwords_per_pair_flags = pair_flags_size / DATA_SIZE;
     auto d_subwords_ptr = thrust::raw_pointer_cast(d_subwords.begin().base());
     auto d_pair_flags_ptr = thrust::raw_pointer_cast(d_pair_flags.begin().base());
-    float elapsed;
-    cudaEvent_t start, stop;
+    
+    unsigned int pairs_count_GPU = 0;
 
     if (timeCount) {
         cudaEventCreate(&start);
@@ -497,22 +547,18 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
     if (timeCount) std::cout << "Elapsed time: " << elapsed << " ms\n";
 
     h_pair_flags = d_pair_flags;
-    //for (size_t i = 0; i < pair_flags_size; ++i)
-    //{
-    //    pairs_count += __popcnt(h_pair_flags[i]);
-    //}
-    //std::cout << pairs_count << " pairs found\n\n";
 
-    int threads2 = 512;
-    int blocks2 = (unsigned int)std::ceil(pair_flags_size / (double)threads);
-    dim3 dimBlock2(threads2, 1, 1);
-    dim3 dimGrid2(blocks2, 1, 1);
+    // get number of pairs from pair_flags
     count_ones<<<dimGrid2, dimBlock2>>>(thrust::raw_pointer_cast(d_pair_flags.begin().base()), pair_flags_size);
+    
     err = cudaGetLastError();
     if (err != cudaSuccess) printf("%s\n", cudaGetErrorString(err));
+    
     cudaDeviceSynchronize();
-    pairs_count_GPU = thrust::reduce(d_pair_flags.begin(), d_pair_flags.end());
-    d_pair_flags = h_pair_flags;
+
+    pairs_count_GPU = thrust::reduce(d_pair_flags.begin(), d_pair_flags.end()); // d_pair_flags invalidated
+    
+    d_pair_flags = h_pair_flags; // reset to correct value
     
     std::cout << pairs_count_GPU << " pairs found\n\n";
 
@@ -529,8 +575,6 @@ void find_ham1_GPU(thrust::device_vector<unsigned int>& d_subwords, \
         cudaEventDestroy(start);
         cudaEventDestroy(stop);
     }
-
-    //thrust::fill(d_pair_flags.begin(), d_pair_flags.end(), 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -562,23 +606,29 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
         {
             bool flag_found = false;
             unsigned int* word_flags = new unsigned int[subwords_per_word_flags];
+
+            // Get flags of current word
+            for (size_t i = 0; i < subwords_per_word_flags; ++i)
+                word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
+
+            // Check if the word has any match
             for (size_t i = 0; i < subwords_per_word_flags; ++i)
             {
-                word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
-            }
-            for (size_t i = 0; i < subwords_per_word_flags; ++i)
                 if (word_flags[i]) {
                     flag_found = true;
                     break;
                 }
-            if (!flag_found) continue;
+            }
+            if (!flag_found) continue; // Process next word if current has no pairs found
+
             for (int i = subwords_per_word_flags - 1; i >= 0; --i)
             {
-                if (!word_flags[i])
-                    continue;
-                int flags_set = __popcnt(word_flags[i]);
-                int flag_pos = (i + 1) * UINT_BITSIZE - 1;
-                size_t j = 0;
+                if (!word_flags[i]) continue; // Process next subset if current has no pairs found
+
+                int flags_set = __popcnt(word_flags[i]); // Matches in current flag subset
+                int flag_pos = (i + 1) * UINT_BITSIZE - 1; // Index of match in CPU data vector
+
+                size_t j = 0; // j - matches processed
                 while (j < flags_set)
                 {
                     if (word_flags[i] % 2) {
@@ -615,23 +665,29 @@ void process_pairs_from_flags(thrust::host_vector<unsigned int>& h_pair_flags, s
         {
             bool flag_found = false;
             unsigned int* word_flags = new unsigned int[subwords_per_word_flags];
+
+            // Get flags of current word
+            for (size_t i = 0; i < subwords_per_word_flags; ++i)
+                word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
+
+            // Check if the word has any match
             for (size_t i = 0; i < subwords_per_word_flags; ++i)
             {
-                word_flags[i] = h_pair_flags[word_idx * subwords_per_word_flags + i];
-            }
-            for (size_t i = 0; i < subwords_per_word_flags; ++i)
                 if (word_flags[i]) {
                     flag_found = true;
                     break;
                 }
-            if (!flag_found) continue;
+            }
+            if (!flag_found) continue; // Process next word if current has no pairs found
+
             for (int i = subwords_per_word_flags - 1; i >= 0; --i)
             {
-                if (!word_flags[i])
-                    continue;
-                int flags_set = __popcnt(word_flags[i]);
-                int flag_pos = (i + 1) * UINT_BITSIZE - 1;
-                size_t j = 0;
+                if (!word_flags[i]) continue; // Process next subset if current has no pairs found
+
+                int flags_set = __popcnt(word_flags[i]); // Matches in current flag subset
+                int flag_pos = (i + 1) * UINT_BITSIZE - 1; // Index of match in CPU data vector
+
+                size_t j = 0; // j - matches processed
                 while (j < flags_set)
                 {
                     if (word_flags[i] % 2) {
