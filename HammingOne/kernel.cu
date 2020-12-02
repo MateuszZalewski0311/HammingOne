@@ -421,7 +421,7 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
     unsigned int* word = new unsigned int[subwords_per_word];
     for (size_t i = 0; i < subwords_per_word; ++i)
     {
-        word[i] = subwords[word_idx * subwords_per_word + i];
+        word[i] = subwords[word_idx + DATA_SIZE * i];
     }
 
     unsigned int hamming_distance, flag_subword_offset, flag_in_subword;
@@ -431,7 +431,7 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
         hamming_distance = 0;
         for (size_t i = 0; i < subwords_per_word && hamming_distance < 2; ++i)
         {
-            hamming_distance += __popc(word[i] ^ subwords[comparison_idx * subwords_per_word + i]);
+            hamming_distance += __popc(word[i] ^ subwords[comparison_idx + DATA_SIZE * i]);
         }
         if (hamming_distance && !(hamming_distance >> 1)) // true when hamming_distance == 1
         {
