@@ -461,19 +461,14 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
     if (word_idx >= DATA_SIZE) return;
 
     unsigned int hamming_distance, flag_subword_offset, flag_in_subword;
-    unsigned int* word = new unsigned int[subwords_per_word];
 
-    // Get subwords of current word
-    for (size_t i = 0; i < subwords_per_word; ++i)
-        word[i] = subwords[word_idx + DATA_SIZE * i];
-
-    // comparison_idx - index of word that current word(word[]) is being comapred to
+    // comparison_idx - index of word that word under word_idx is being compared to
     for (size_t comparison_idx = word_idx + 1; comparison_idx < DATA_SIZE; ++comparison_idx)
     {
         hamming_distance = 0;
 
         for (size_t i = 0; i < subwords_per_word && hamming_distance < 2; ++i)
-            hamming_distance += __popc(word[i] ^ subwords[comparison_idx + DATA_SIZE * i]);
+            hamming_distance += __popc(subwords[word_idx + DATA_SIZE * i] ^ subwords[comparison_idx + DATA_SIZE * i]);
 
         // each word has at least DATA_SIZE flags, flags for matches are set on match's index in CPU data
         if (hamming_distance && !(hamming_distance >> 1)) // true when hamming_distance == 1
@@ -483,8 +478,6 @@ __global__ void find_ham1_GPU_ker(const unsigned int* subwords, unsigned int* pa
             pair_flags[word_idx * subwords_per_pair_flags + flag_subword_offset] |= flag_in_subword;
         }
     }
-
-    delete[] word;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
