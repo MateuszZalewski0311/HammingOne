@@ -361,39 +361,45 @@ thrust::device_vector<unsigned int> move_data_to_GPU(const typename std::vector<
     start = std::chrono::high_resolution_clock::now();
 
     int i = 0;
-    for (const auto& word_bitset : data_vec)
+    if (N < UINT_BITSIZE)
     {
-        //std::cout << std::endl << "Original " << word_bitset.to_string() << std::endl;
-        if (N < UINT_BITSIZE)
+        for (const auto& word_bitset : data_vec)
         {
             std::string subword_str = word_bitset.to_string().substr(0, N);
             for (size_t subword_str_size = N; subword_str_size < UINT_BITSIZE; ++subword_str_size)
                 subword_str += "0";
             unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
-            //std::cout << "Subword: " << subword_str << ", " << subword << std::endl;
             h_words[i++] = subword;
             continue;
         }
+    }
+    else
+    {
         size_t j = 0;
         for (; j + UINT_BITSIZE < N; j += UINT_BITSIZE)
         {
-            std::string subword_str = word_bitset.to_string().substr(j, UINT_BITSIZE);
-            unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
-            //std::cout << "Subword: " << subword_str << ", " << subword << std::endl;
-            h_words[i++] = subword;
+            for (const auto& word_bitset : data_vec)
+            {
+                std::string subword_str = word_bitset.to_string().substr(j, UINT_BITSIZE);
+                unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
+                h_words[i++] = subword;
+            }
         }
         if (j + UINT_BITSIZE != N) // last subword smaller than UINT_BITSIZE
         {
-            std::string subword_str = word_bitset.to_string().substr(j, N - j);
-            for (size_t subword_str_size = N - j; subword_str_size < UINT_BITSIZE; ++subword_str_size)
-                subword_str += "0";
-            unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
-            //std::cout << "Subword: " << subword_str << ", " << subword << std::endl;
-            h_words[i++] = subword;
+            for (const auto& word_bitset : data_vec)
+            {
+                std::string subword_str = word_bitset.to_string().substr(j, N - j);
+                for (size_t subword_str_size = N - j; subword_str_size < UINT_BITSIZE; ++subword_str_size)
+                    subword_str += "0";
+                unsigned int subword = (unsigned int)(std::bitset<N>(subword_str).to_ulong());
+                h_words[i++] = subword;
+            }
         }
     }
     d_words = h_words;
 
+    // Record end time
     finish = std::chrono::high_resolution_clock::now();
     elapsed = finish - start;
 
